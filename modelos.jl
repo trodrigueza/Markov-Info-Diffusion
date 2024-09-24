@@ -206,7 +206,7 @@ Veamos un ejemplo de uso:
 """
 
 # ╔═╡ be2a095c-f611-4401-a209-808f95d02be7
-sim_results = run_simulation(100, 1000, 0.5, 0.5, 100)
+sim_results = run_simulation(100, 1000, 0.5, 0.5, 1000)
 
 # ╔═╡ df9e046f-3df8-4c6c-8624-1a671d249943
 md"""
@@ -393,7 +393,7 @@ Veamos una simulación: (distinta de las obtenidas en el resultado anterior)
 """
 
 # ╔═╡ 5e2ac555-559c-4228-bb15-a8a9e470bb6f
-fig, slider, update_viz = run_and_visualize_simulation(10, 100, 0.5, 0.5);
+fig, slider, update_viz = run_and_visualize_simulation(100, 1000, 0.5, 0.5);
 
 # ╔═╡ cea801c9-deed-481f-8d4a-70f4bc4bed64
 @bind step slider
@@ -889,11 +889,508 @@ begin
 	fig3
 end
 
+# ╔═╡ aa16771e-505c-4287-ad57-27b9833637c1
+md"""
+----
+# Experimentos:
+"""
+
+# ╔═╡ 1bd58b7b-9f71-470c-8989-c94eedaaeefc
+import DataFrames, CSV
+
+# ╔═╡ 8cce2a8e-3b89-4a85-a26f-a327d8c5c44d
+md"""
+- Impacto de los tamaños y estructuras de las redes en la difusión de ideas bajo los dos modelos: Creamos una serie de experimentos que varíen estos parámetros y comparen los resultados. 
+"""
+
+# ╔═╡ 5d3ae28e-20d7-420a-81f8-e4e3310a6b7c
+function calculate_final_percentages(final_state, model_number)
+    total_agents = sum(values(final_state))
+    if model_number == 1 || model_number == 2
+        return (
+            phi = 100 * final_state[phi] / total_agents,
+            notphi = 100 * final_state[notphi] / total_agents,
+            ind = 100 * final_state[ind] / total_agents
+        )
+    else  # model 3
+        informed = count(s -> s == informed, final_state)
+        return (
+            phi = 100 * informed / total_agents,
+            notphi = 0.0,
+            ind = 100 * (total_agents - informed) / total_agents
+        )
+    end
+end
+
+# ╔═╡ 04195279-d7c3-4559-ae7a-39898e5c80bf
+function create_network(type, size)
+    if type == :barabasi_albert
+        return barabasi_albert(size, 3)
+    elseif type == :erdos_renyi
+        return erdos_renyi(size, 6/size)
+    elseif type == :watts_strogatz
+        return watts_strogatz(size, 6, 0.1)
+    else
+        error("Tipo de red no soportado")
+    end
+end
+
+# ╔═╡ 775c0eda-15da-46f4-b9f9-63713f20dfc2
+function run_experiment(model_number::Int, network_sizes, network_types, params, num_steps, num_runs)
+    results = DataFrames.DataFrame(
+        Model = Int[],
+        NetworkSize = Int[],
+        NetworkType = String[],
+        AvgMessagesSent = Float64[],
+        FinalPhiPercentage = Float64[],
+        FinalNotPhiPercentage = Float64[],
+        FinalIndPercentage = Float64[]
+    )
+    
+    for size in network_sizes
+        for type in network_types
+            messages_sent = []
+            phi_percentages = []
+            notphi_percentages = []
+            ind_percentages = []
+            
+            for _ in 1:num_runs
+                network = create_network(type, size)
+                if model_number == 1
+                    simulation_result = run_simulation(size, num_steps, params.λ, params.μ, 1)[1]
+                elseif model_number == 2
+                    simulation_result = run_simulation2(size, num_steps, params.λ_range, params.μ_range, 1)[1]
+                else  # model 3
+                    simulation_result = run_simulation3(size, num_steps, params.spread_probability_range, 1)[1]
+                end
+                
+                push!(messages_sent, count_messages(simulation_result))
+                percentages = calculate_final_percentages(simulation_result[end], model_number)
+                push!(phi_percentages, percentages.phi)
+                push!(notphi_percentages, percentages.notphi)
+                push!(ind_percentages, percentages.ind)
+            end
+            
+            avg_messages = mean(messages_sent)
+            avg_phi = mean(phi_percentages)
+            avg_notphi = mean(notphi_percentages)
+            avg_ind = mean(ind_percentages)
+            
+            DataFrames.push!(results, (
+                model_number,
+                size,
+                string(type),
+                avg_messages,
+                avg_phi,
+                avg_notphi,
+                avg_ind
+            ))
+        end
+    end
+    
+    return results
+end
+
+# ╔═╡ bb02bb8e-d071-4b8a-b501-fd7849d223cc
+begin
+network_sizes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+network_types = [:barabasi_albert, :erdos_renyi, :watts_strogatz]
+num_steps = 10000
+num_runs = 100
+
+params1 = (λ = 0.5, μ = 0.5)
+params2 = (λ_range = (0.3, 0.7), μ_range = (0.3, 0.7))
+params3 = (spread_probability_range = (0.1, 0.5),)
+end
+
+# ╔═╡ 6c79d8b0-5dca-4e77-8472-f2d504f02d84
+results_model1 = run_experiment(1, network_sizes, network_types, params1, num_steps, num_runs)
+
+# ╔═╡ d7894131-159c-459f-bb8a-34b2422881e3
+results_model2 = run_experiment(2, network_sizes, network_types, params2, num_steps, num_runs)
+
+# ╔═╡ f7df07f5-a36e-498a-856c-66cd5231f888
+# results_model3 = run_experiment(3, network_sizes, network_types, params3, num_steps, num_runs)
+
+# ╔═╡ 6c4bd89a-80c3-4a99-96ac-f19b2820e5f1
+all_results = vcat(results_model1, results_model2)
+
+# ╔═╡ 655e8679-9465-4d0c-83c2-f935cc59de98
+CSV.write("network_impact_results.csv", all_results)
+
+# ╔═╡ 5a3f260a-983a-4f4b-8958-077dd6c716e6
+function plot_results(results)
+    p1 = Plots.plot(title="Mensajes enviados vs Tamaño de red")
+    p2 = Plots.plot(title="Porcentaje final de creencias vs Tamaño de red")
+    
+    for model in unique(results.Model)
+        for type in unique(results.NetworkType)
+            data = results[(results.Model .== model) .& (results.NetworkType .== type), :]
+            Plots.plot!(p1, data.NetworkSize, data.AvgMessagesSent, 
+                  label="Modelo $(model) - $(type)", marker=:circle)
+            Plots.plot!(p2, data.NetworkSize, data.FinalPhiPercentage, 
+                  label="Modelo $(model) - $(type) - φ", marker=:circle)
+            # Plots.plot!(p2, data.NetworkSize, data.FinalNotPhiPercentage, 
+                  #label="Modelo $(model) - $(type) - ¬φ", marker=:square)
+            # Plots.plot!(p2, data.NetworkSize, data.FinalIndPercentage, 
+                  #label="Modelo $(model) - $(type) - ⊥", marker=:diamond)
+        end
+    end
+    
+    Plots.xlabel!(p1, "Tamaño de red")
+    Plots.ylabel!(p1, "Promedio de mensajes enviados")
+    Plots.xlabel!(p2, "Tamaño de red")
+    Plots.ylabel!(p2, "Porcentaje final de agentes")
+    Plots.ylims!(p2, (0, 100))
+    
+    Plots.plot(p1, p2, layout=(2,1), size=(800,1000))
+end
+
+# ╔═╡ e08d173a-7902-45fa-80e5-dbeed87e401d
+plot_results(all_results)
+
+# ╔═╡ eba55624-9dbd-4f42-8b4d-cce1d3380e1a
+savefig("network_impact_analysis.png")
+
+# ╔═╡ 1454d276-c0f7-46be-a847-631861fa77a8
+md"""
+- investigar el impacto de la conectividad inicial de los nodos semilla.
+"""
+
+# ╔═╡ 412d86a6-aa9b-462f-8638-b98d2b3ba9de
+function select_seed_nodes(network, strategy)
+    if strategy == :high_degree
+        degrees = degree(network.graph)
+        sorted_nodes = sortperm(degrees, rev=true)
+        return sorted_nodes[1:2]  # Seleccionar los dos nodos con mayor grado
+    elseif strategy == :low_degree
+        degrees = degree(network.graph)
+        sorted_nodes = sortperm(degrees)
+        return sorted_nodes[1:2]  # Seleccionar los dos nodos con menor grado
+    elseif strategy == :random
+        return rand(1:length(network.agents), 2)  # Seleccionar dos nodos al azar
+    end
+end
+
+
+# ╔═╡ 8117c613-fafa-4ca2-9867-146c13a3adeb
+function run_experiment_seed_connectivity(model_number::Int, network_sizes, network_types, params, num_steps, num_runs, seed_strategies)
+    results = DataFrames.DataFrame(
+        Model = Int[],
+        NetworkSize = Int[],
+        NetworkType = String[],
+        SeedStrategy = String[],
+        AvgMessagesSent = Float64[],
+        FinalPhiPercentage = Float64[],
+        FinalNotPhiPercentage = Float64[],
+        FinalIndPercentage = Float64[]
+    )
+    
+    for size in network_sizes
+        for type in network_types
+            for strategy in seed_strategies
+                messages_sent = []
+                phi_percentages = []
+                notphi_percentages = []
+                ind_percentages = []
+                
+                for _ in 1:num_runs
+                    if model_number == 1
+                        network = socialNetwork(size)
+                    elseif model_number == 2
+                        network = socialNetwork2(size, params.λ_range, params.μ_range)
+                    end
+                    
+                    seed_nodes = select_seed_nodes(network, strategy)
+                    
+                    
+                    if model_number == 1
+						set_seed_nodes!(network, seed_nodes[1], seed_nodes[2])
+                        simulation_result = run_simulation(size, num_steps, params.λ, params.μ, 1)[1]
+                    elseif model_number == 2
+						set_seed_nodes2!(network, seed_nodes[1], seed_nodes[2])
+                        simulation_result = run_simulation2(size, num_steps, params.λ_range, params.μ_range, 1)[1]
+                    end
+                    
+                    push!(messages_sent, count_messages(simulation_result))
+                    final_state = simulation_result[end]
+                    total_agents = sum(values(final_state))
+                    push!(phi_percentages, 100 * final_state[phi] / total_agents)
+                    push!(notphi_percentages, 100 * final_state[notphi] / total_agents)
+                    push!(ind_percentages, 100 * final_state[ind] / total_agents)
+                end
+                
+                DataFrames.push!(results, (
+                    model_number,
+                    size,
+                    string(type),
+                    string(strategy),
+                    mean(messages_sent),
+                    mean(phi_percentages),
+                    mean(notphi_percentages),
+                    mean(ind_percentages)
+                ))
+            end
+        end
+    end
+    
+    return results
+end
+
+# ╔═╡ 48f035ef-6920-4c44-bbfc-e8bdff7eee7d
+function plot_results_seed_connectivity(results)
+    p1 = Plots.plot(title="Mensajes enviados vs Tamaño de red")
+    p2 = Plots.plot(title="Porcentaje final de φ vs Tamaño de red")
+    
+    for model in unique(results.Model)
+        for type in unique(results.NetworkType)
+            for strategy in unique(results.SeedStrategy)
+                data = results[(results.Model .== model) .& (results.NetworkType .== type) .& (results.SeedStrategy .== strategy), :]
+                Plots.plot!(p1, data.NetworkSize, data.AvgMessagesSent, 
+                      label="Modelo $(model) - $(type) - $(strategy)", marker=:circle)
+                Plots.plot!(p2, data.NetworkSize, data.FinalPhiPercentage, 
+                      label="Modelo $(model) - $(type) - $(strategy)", marker=:circle)
+            end
+        end
+    end
+    
+    Plots.xlabel!(p1, "Tamaño de red")
+    Plots.ylabel!(p1, "Promedio de mensajes enviados")
+    Plots.xlabel!(p2, "Tamaño de red")
+    Plots.ylabel!(p2, "Porcentaje final de agentes con φ")
+    
+    Plots.plot(p1, p2, layout=(2,1), size=(800,1000))
+end
+
+# ╔═╡ d9e6177e-9e5f-4dc4-b641-71ea208f37a7
+seed_strategies = [:high_degree, :low_degree, :random]
+
+# ╔═╡ 0a53ccdd-669d-406e-960b-71a2b5c75aa7
+begin
+params1_ = (λ = 0.5, μ = 0.5)
+params2_ = (λ_range = (0.3, 0.7), μ_range = (0.3, 0.7))
+end
+
+# ╔═╡ 5e3a9293-68dd-4963-8c89-26857d3b9ae2
+results_model1_seed = run_experiment_seed_connectivity(1, network_sizes, network_types, params1_, num_steps, num_runs, seed_strategies)
+
+# ╔═╡ ebaf12c4-cbeb-4cd6-b44b-6055cc481d66
+results_model2_seed = run_experiment_seed_connectivity(2, network_sizes, network_types, params2_, num_steps, num_runs, seed_strategies)
+
+# ╔═╡ cc046d8f-25d9-40f8-a843-5c1dbe968808
+all_results_seeds = vcat(results_model1_seed, results_model2_seed)
+
+# ╔═╡ ad9c2c81-2b07-4759-aaa6-8680003b2483
+CSV.write("seed_connectivity_impact_results.csv", all_results)
+
+# ╔═╡ cbc786ac-8505-4ece-a13b-3937aefc7ac5
+plot_results_seed_connectivity(all_results_seeds)
+
+# ╔═╡ f84886b3-c620-4ef9-8856-6f1ac03de662
+savefig("seed_connectivity_impact_analysis.png")
+
+# ╔═╡ 2d7e1efc-4bb0-4203-83ab-5e6b72c9bffd
+md"""
+- Investigar cambio de fases sobre el grafo reticular $k\times k$.
+"""
+
+# ╔═╡ 792f0379-6c15-463c-8691-3e51e8f117fc
+function create_lattice_graph(n, m)
+    # g = Grid([n, m])
+	g = barabasi_albert(n*m, 3)
+    return Graph(g)
+end
+
+# ╔═╡ 6e7a7d2e-deac-4044-941a-78bd2e5cb982
+function socialNetworkLattice(n, m)
+    graph = create_lattice_graph(n, m)
+    agents = [Agent(i, ind) for i in 1:nv(graph)]
+    SocialNetwork(graph, agents)
+end
+
+# ╔═╡ e1ab8cc1-7074-4f00-a495-c51e1b7e8fdf
+function run_simulationLattice(n, m, num_steps, λ, μ, num_runs)
+    results = []
+    for _ in 1:num_runs
+        network = socialNetworkLattice(n, m)
+        set_seed_nodes!(network, 50, 59)  # Esquinas opuestas como semillas
+        
+        for _ in 1:num_steps
+            simulate_step!(network, λ, μ)
+        end
+        
+        final_state = count_beliefs(network)
+        total_agents = sum(values(final_state))
+        push!(results, (
+            phi = final_state[phi] / total_agents,
+            notphi = final_state[notphi] / total_agents,
+            ind = final_state[ind] / total_agents
+        ))
+    end
+    return results
+end
+
+# ╔═╡ d6e0d47b-e85f-4f65-8206-c4d90a88831c
+function parameter_sweep(n, m, num_steps, λ_range, μ_range, num_runs)
+    results = []
+    for λ in λ_range
+        for μ in μ_range
+            sim_results = run_simulationLattice(n, m, num_steps, λ, μ, num_runs)
+            avg_results = (
+                λ = λ,
+                μ = μ,
+                phi = mean([r.phi for r in sim_results]),
+                notphi = mean([r.notphi for r in sim_results]),
+                ind = mean([r.ind for r in sim_results])
+            )
+            push!(results, avg_results)
+        end
+    end
+    return results
+end
+
+# ╔═╡ 1fab02e3-af04-4746-93ad-b9636a18423a
+begin
+	n, m = 10, 10
+	num_stepsL = 1000
+	λ_rangeL = 0.0:0.05:1.0
+	μ_rangeL = 0.0:0.05:1.0
+	num_runsL = 1000
+end
+
+# ╔═╡ 0d0486b7-733f-4b80-a6ab-25e3e2a78b53
+sweep_results = parameter_sweep(n, m, num_stepsL, λ_rangeL, μ_rangeL, num_runsL)
+
+# ╔═╡ b8d96a6f-372f-4f54-87ea-fe79998ef2f7
+function plot_phase_diagram(results)
+    λ_values = unique([r.λ for r in results])
+    μ_values = unique([r.μ for r in results])
+    
+    phi_data = [r.phi for r in results]
+    phi_matrix = reshape(phi_data, (length(μ_values), length(λ_values)))
+    
+    Plots.heatmap(λ_values, μ_values, phi_matrix,
+            xlabel="λ", ylabel="μ", title="Proporción final de agentes con creencia φ",
+            color=:viridis)
+end
+
+# ╔═╡ fff84d4a-3c19-4cee-ad08-6c195cb5aac4
+plot_phase_diagram(sweep_results)
+
+# ╔═╡ 734eca76-ef16-4ec3-a78b-37eef4b96f38
+function find_critical_points(results)
+    λ_values = unique([r.λ for r in results])
+    μ_values = unique([r.μ for r in results])
+    
+    critical_points = []
+    
+    for μ in μ_values
+        μ_results = filter(r -> r.μ ≈ μ, results)
+        sort!(μ_results, by = r -> r.λ)
+        
+        for i in 2:length(μ_results)
+            if abs(μ_results[i].phi - μ_results[i-1].phi) > 0.1  # Umbral arbitrario
+                push!(critical_points, (λ = μ_results[i].λ, μ = μ))
+                break
+            end
+        end
+    end
+    
+    return critical_points
+end
+
+# ╔═╡ c4d3b6c3-1ef8-474a-a064-86d5fe3cc999
+critical_points = find_critical_points(sweep_results)
+
+# ╔═╡ e4dc1bc9-3214-40c9-9f24-356244d220f4
+begin
+function run_simulation_fixed_mu(n, m, num_steps, λ, μ, num_runs)
+    results = []
+    for _ in 1:num_runs
+        network = socialNetworkLattice(n, m)
+        set_seed_nodes!(network, 1, n*m)
+        
+        for _ in 1:num_steps
+            simulate_step!(network, λ, μ)
+        end
+        
+        final_state = count_beliefs(network)
+        total_agents = sum(values(final_state))
+        push!(results, final_state[phi] / total_agents)
+    end
+    return results
+end
+
+function parameter_sweep_fixed_mu(n, m, num_steps, λ_range, μ_values, num_runs)
+    results = []
+    for μ in μ_values
+        for λ in λ_range
+            sim_results = run_simulation_fixed_mu(n, m, num_steps, λ, μ, num_runs)
+            push!(results, (λ = λ, μ = μ, mean_phi = mean(sim_results), var_phi = var(sim_results)))
+        end
+    end
+    return results
+end
+
+function find_critical_lambda(results, μ)
+    μ_results = filter(r -> r.μ ≈ μ, results)
+    sort!(μ_results, by = r -> r.λ)
+    
+    max_var_index = argmax([r.var_phi for r in μ_results])
+    return μ_results[max_var_index].λ
+end
+end
+
+# ╔═╡ 5e34d4b8-66cb-4342-b793-af2b2e0a2c4b
+μ_valuesL = [0.1, 0.3, 0.5, 0.7, 0.9]
+
+# ╔═╡ eabbaa7c-674c-4729-b025-bbf14753852d
+sweep_results2 = parameter_sweep_fixed_mu(n, m, num_stepsL, λ_rangeL, μ_valuesL, num_runsL)
+
+# ╔═╡ 8e08d18d-c247-4fa7-8bda-f1133e6610e5
+begin
+Plots.plot(title="Proporción media de agentes con creencia φ vs λ")
+for μ in μ_valuesL
+    μ_results = filter(r -> r.μ ≈ μ, sweep_results2)
+    Plots.plot!(
+        [r.λ for r in μ_results],
+        [r.mean_phi for r in μ_results],
+        label="μ = $μ"
+    )
+end
+Plots.xlabel!("λ")
+Plots.ylabel!("Proporción media de φ")
+end
+
+# ╔═╡ d6cb2941-7609-42d1-ae30-7d8140f75865
+savefig("mean_phi_vs_lambda.png")
+
+# ╔═╡ 42ee5a07-6dc2-408b-bbe5-f9c4d77e2dfc
+begin
+# Gráfico de la varianza de la proporción de agentes con creencia φ
+Plots.plot(title="Varianza de la proporción de agentes con creencia φ vs λ")
+for μ in μ_valuesL
+    μ_results = filter(r -> r.μ ≈ μ, sweep_results2)
+    Plots.plot!(
+        [r.λ for r in μ_results],
+        [r.var_phi for r in μ_results],
+        label="μ = $μ"
+    )
+end
+Plots.xlabel!("λ")
+Plots.ylabel!("Varianza de la proporción de φ")
+end
+
+# ╔═╡ 9d301842-a1dc-459f-af06-ef2f06462309
+savefig("var_phi_vs_lambda.png")
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
@@ -908,8 +1405,10 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
 
 [compat]
+CSV = "~0.10.14"
 CairoMakie = "~0.12.10"
 ColorSchemes = "~3.26.0"
+DataFrames = "~1.6.1"
 Distributions = "~0.25.111"
 FileIO = "~1.16.3"
 GraphMakie = "~0.5.12"
@@ -928,7 +1427,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.5"
 manifest_format = "2.0"
-project_hash = "c3172f9b611be15c3acd6abdbeae072ec8ba6fed"
+project_hash = "fdc920e6c6cb0efce7fdad50d7486b0ced0a272c"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1092,6 +1591,12 @@ git-tree-sha1 = "e329286945d0cfc04456972ea732551869af1cfc"
 uuid = "4e9b3aee-d8a1-5a3d-ad8b-7d824db253f0"
 version = "1.0.1+0"
 
+[[deps.CSV]]
+deps = ["CodecZlib", "Dates", "FilePathsBase", "InlineStrings", "Mmap", "Parsers", "PooledArrays", "PrecompileTools", "SentinelArrays", "Tables", "Unicode", "WeakRefStrings", "WorkerUtilities"]
+git-tree-sha1 = "6c834533dc1fabd820c1db03c839bf97e45a3fab"
+uuid = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+version = "0.10.14"
+
 [[deps.Cairo]]
 deps = ["Cairo_jll", "Colors", "Glib_jll", "Graphics", "Libdl", "Pango_jll"]
 git-tree-sha1 = "7b6ad8c35f4bc3bca8eb78127c8b99719506a5fb"
@@ -1237,6 +1742,11 @@ git-tree-sha1 = "fcbb72b032692610bfbdb15018ac16a36cf2e406"
 uuid = "adafc99b-e345-5852-983c-f28acb93d879"
 version = "0.3.1"
 
+[[deps.Crayons]]
+git-tree-sha1 = "249fe38abf76d48563e2f4556bebd215aa317e15"
+uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
+version = "4.1.1"
+
 [[deps.CustomUnitRanges]]
 git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
 uuid = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
@@ -1246,6 +1756,12 @@ version = "1.0.2"
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 version = "1.16.0"
+
+[[deps.DataFrames]]
+deps = ["Compat", "DataAPI", "DataStructures", "Future", "InlineStrings", "InvertedIndices", "IteratorInterfaceExtensions", "LinearAlgebra", "Markdown", "Missings", "PooledArrays", "PrecompileTools", "PrettyTables", "Printf", "REPL", "Random", "Reexport", "SentinelArrays", "SortingAlgorithms", "Statistics", "TableTraits", "Tables", "Unicode"]
+git-tree-sha1 = "04c738083f29f86e62c8afc341f0967d8717bdb8"
+uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+version = "1.6.1"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -1470,6 +1986,10 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "1ed150b39aebcc805c26b93a8d0122c940f64ce2"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.14+0"
+
+[[deps.Future]]
+deps = ["Random"]
+uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
@@ -1736,6 +2256,19 @@ git-tree-sha1 = "d1b1b796e47d94588b3757fe84fbf65a5ec4a80d"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
 version = "0.1.5"
 
+[[deps.InlineStrings]]
+git-tree-sha1 = "45521d31238e87ee9f9732561bfee12d4eebd52d"
+uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
+version = "1.4.2"
+
+    [deps.InlineStrings.extensions]
+    ArrowTypesExt = "ArrowTypes"
+    ParsersExt = "Parsers"
+
+    [deps.InlineStrings.weakdeps]
+    ArrowTypes = "31f734f8-188a-4ce0-8406-c8a06bd891cd"
+    Parsers = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
+
 [[deps.IntegralArrays]]
 deps = ["ColorTypes", "FixedPointNumbers", "IntervalSets"]
 git-tree-sha1 = "be8e690c3973443bec584db3346ddc904d4884eb"
@@ -1792,6 +2325,11 @@ weakdeps = ["Random", "RecipesBase", "Statistics"]
     IntervalSetsRandomExt = "Random"
     IntervalSetsRecipesBaseExt = "RecipesBase"
     IntervalSetsStatisticsExt = "Statistics"
+
+[[deps.InvertedIndices]]
+git-tree-sha1 = "0dc7b50b8d436461be01300fd8cd45aa0274b038"
+uuid = "41ab1584-1d38-5bbf-9106-f11c6c58b48f"
+version = "1.3.0"
 
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "630b497eafcc20001bba38a4651b327dcfc491d2"
@@ -2375,6 +2913,12 @@ git-tree-sha1 = "a14a99e430e42a105c898fcc7f212334bc7be887"
 uuid = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
 version = "3.2.4"
 
+[[deps.PooledArrays]]
+deps = ["DataAPI", "Future"]
+git-tree-sha1 = "36d8b4b899628fb92c2749eb488d884a926614d3"
+uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
+version = "1.4.3"
+
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
 git-tree-sha1 = "5aa36f7049a63a1528fe8f7c3f2113413ffd4e1f"
@@ -2386,6 +2930,12 @@ deps = ["TOML"]
 git-tree-sha1 = "9306f6085165d270f7e3db02af26a400d580f5c6"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
 version = "1.4.3"
+
+[[deps.PrettyTables]]
+deps = ["Crayons", "LaTeXStrings", "Markdown", "PrecompileTools", "Printf", "Reexport", "StringManipulation", "Tables"]
+git-tree-sha1 = "66b20dd35966a748321d3b2537c4584cf40387c7"
+uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+version = "2.3.2"
 
 [[deps.Printf]]
 deps = ["Unicode"]
@@ -2704,6 +3254,12 @@ git-tree-sha1 = "3b1dcbf62e469a67f6733ae493401e53d92ff543"
 uuid = "f3b207a7-027a-5e70-b257-86293d7955fd"
 version = "0.15.7"
 
+[[deps.StringManipulation]]
+deps = ["PrecompileTools"]
+git-tree-sha1 = "a04cabe79c5f01f4d723cc6704070ada0b9d46d5"
+uuid = "892a3eda-7b42-436c-8928-eab12a02cf0e"
+version = "0.3.4"
+
 [[deps.StructArrays]]
 deps = ["ConstructionBase", "DataAPI", "Tables"]
 git-tree-sha1 = "f4dc295e983502292c4c3f951dbb4e985e35b3be"
@@ -2868,6 +3424,12 @@ git-tree-sha1 = "93f43ab61b16ddfb2fd3bb13b3ce241cafb0e6c9"
 uuid = "2381bf8a-dfd0-557d-9999-79630e7b1b91"
 version = "1.31.0+0"
 
+[[deps.WeakRefStrings]]
+deps = ["DataAPI", "InlineStrings", "Parsers"]
+git-tree-sha1 = "b1be2855ed9ed8eac54e5caff2afcdb442d52c23"
+uuid = "ea10d353-3f73-51f8-a26c-33c1cb351aa5"
+version = "1.4.2"
+
 [[deps.Widgets]]
 deps = ["Colors", "Dates", "Observables", "OrderedCollections"]
 git-tree-sha1 = "fcdae142c1cfc7d89de2d11e08721d0f2f86c98a"
@@ -2879,6 +3441,11 @@ deps = ["LinearAlgebra", "SparseArrays"]
 git-tree-sha1 = "c1a7aa6219628fcd757dede0ca95e245c5cd9511"
 uuid = "efce3f68-66dc-5838-9240-27a6d6f5f9b6"
 version = "1.0.0"
+
+[[deps.WorkerUtilities]]
+git-tree-sha1 = "cd1659ba0d57b71a464a29e64dbc67cfe83d54e7"
+uuid = "76eceee3-57b5-4d4a-8e66-0e911cebbf60"
+version = "1.6.1"
 
 [[deps.XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Zlib_jll"]
@@ -3239,5 +3806,50 @@ version = "1.4.1+1"
 # ╠═65328c7d-f1a7-49d1-84aa-baac3935e1a2
 # ╟─0041d51b-7dbc-41de-8f1d-ccc4a0bde9e1
 # ╟─18726c83-3d71-4a95-9115-dc2d0613016e
+# ╟─aa16771e-505c-4287-ad57-27b9833637c1
+# ╠═1bd58b7b-9f71-470c-8989-c94eedaaeefc
+# ╟─8cce2a8e-3b89-4a85-a26f-a327d8c5c44d
+# ╠═775c0eda-15da-46f4-b9f9-63713f20dfc2
+# ╠═5d3ae28e-20d7-420a-81f8-e4e3310a6b7c
+# ╠═04195279-d7c3-4559-ae7a-39898e5c80bf
+# ╠═bb02bb8e-d071-4b8a-b501-fd7849d223cc
+# ╠═6c79d8b0-5dca-4e77-8472-f2d504f02d84
+# ╠═d7894131-159c-459f-bb8a-34b2422881e3
+# ╠═f7df07f5-a36e-498a-856c-66cd5231f888
+# ╠═6c4bd89a-80c3-4a99-96ac-f19b2820e5f1
+# ╠═655e8679-9465-4d0c-83c2-f935cc59de98
+# ╠═5a3f260a-983a-4f4b-8958-077dd6c716e6
+# ╠═e08d173a-7902-45fa-80e5-dbeed87e401d
+# ╠═eba55624-9dbd-4f42-8b4d-cce1d3380e1a
+# ╟─1454d276-c0f7-46be-a847-631861fa77a8
+# ╠═8117c613-fafa-4ca2-9867-146c13a3adeb
+# ╠═412d86a6-aa9b-462f-8638-b98d2b3ba9de
+# ╠═48f035ef-6920-4c44-bbfc-e8bdff7eee7d
+# ╠═d9e6177e-9e5f-4dc4-b641-71ea208f37a7
+# ╠═0a53ccdd-669d-406e-960b-71a2b5c75aa7
+# ╠═5e3a9293-68dd-4963-8c89-26857d3b9ae2
+# ╠═ebaf12c4-cbeb-4cd6-b44b-6055cc481d66
+# ╠═cc046d8f-25d9-40f8-a843-5c1dbe968808
+# ╠═ad9c2c81-2b07-4759-aaa6-8680003b2483
+# ╠═cbc786ac-8505-4ece-a13b-3937aefc7ac5
+# ╠═f84886b3-c620-4ef9-8856-6f1ac03de662
+# ╟─2d7e1efc-4bb0-4203-83ab-5e6b72c9bffd
+# ╠═792f0379-6c15-463c-8691-3e51e8f117fc
+# ╠═6e7a7d2e-deac-4044-941a-78bd2e5cb982
+# ╠═e1ab8cc1-7074-4f00-a495-c51e1b7e8fdf
+# ╠═d6e0d47b-e85f-4f65-8206-c4d90a88831c
+# ╠═1fab02e3-af04-4746-93ad-b9636a18423a
+# ╠═0d0486b7-733f-4b80-a6ab-25e3e2a78b53
+# ╠═b8d96a6f-372f-4f54-87ea-fe79998ef2f7
+# ╠═fff84d4a-3c19-4cee-ad08-6c195cb5aac4
+# ╠═734eca76-ef16-4ec3-a78b-37eef4b96f38
+# ╠═c4d3b6c3-1ef8-474a-a064-86d5fe3cc999
+# ╠═e4dc1bc9-3214-40c9-9f24-356244d220f4
+# ╠═5e34d4b8-66cb-4342-b793-af2b2e0a2c4b
+# ╠═eabbaa7c-674c-4729-b025-bbf14753852d
+# ╠═8e08d18d-c247-4fa7-8bda-f1133e6610e5
+# ╠═d6cb2941-7609-42d1-ae30-7d8140f75865
+# ╠═42ee5a07-6dc2-408b-bbe5-f9c4d77e2dfc
+# ╠═9d301842-a1dc-459f-af06-ef2f06462309
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
